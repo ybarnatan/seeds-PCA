@@ -1,0 +1,163 @@
+---
+title: "PCA analysis on seeds distribution in Mendoza, Argentina"
+output: 
+  html_document:
+    number_sections: true
+
+---
+
+```{r setup, include=FALSE, echo=FALSE, warning= FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## <u>*Background*</u>
+
+Seeds, an important food resource for consumers in deserts, often have highly heterogeneous abundances in the soil seed bank at small scales (centimeters to meters), in relation to the structure of the vegetation. For example, they tend to be much more abundant under the canopy of woody plants.
+
+To evaluate whether granivorous birds (seed consumers) in the Central Mountain Desert (Mendoza, Argentina) select feeding sites, the characteristics of the sites where birds were observed feeding on seeds were compared with those of 60 randomly located sites in the same area to represent the heterogeneity available in the environment. This analysis was done in areas with a 1-meter radius, and a series of structural variables were estimated:
+
++ Horizontal cover of grasses (GRAMS), subshrubs (SUBARBTS), shrubs (ARBTS), and trees (ARBS)
++ Vegetation density (the sum of the number of strata occupied at all points of each microsite; DENSIDAD)
++ Variation in maximum height between points of each microsite (CVALT)
++ Horizontal cover of bare soil (SUEDES) and dense mulch (MANTI) 
+
+
+```{r,echo = FALSE, cache=FALSE, warning=FALSE, message=FALSE}
+#Loading libraries
+library(GGally) 
+library(psych)
+library(vegan)
+library(gclus)
+library(ggplot2)
+library(readr)
+library(gg3D) #devtools::install_github("AckerDWM/gg3D")
+library(knitr)
+library(kableExtra)
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+#Loading the data
+pathBase = file.path(dirname(rstudioapi::getSourceEditorContext()$path))
+seeds  <- read_delim(paste0(pathBase, "/seeds-PCA.txt"), delim = "\t", escape_double = FALSE, trim_ws = TRUE)
+attach(seeds)
+seeds$Grupo = as.factor(seeds$Grupo)
+seeds <- seeds %>%
+  mutate(category = recode(category, "A" = "Apple", "B" = "Banana", "C" = "Cherry"))
+
+
+
+```
+
+## <u>*Descriptive analytics* </u>
+
+As this is a multivariate type of analysis, we are resticted in the number of axis we can visualize the data altogether. If we plot 3 of the variables sampled, we can't see crystal clear if there are or not any pattern that guide this phenomenon.
+
+```{r, warning=FALSE}
+ggplot(seeds, aes(x=Grams, y=Arbts, z=Densidad, color=Grupo)) + 
+  theme_void() +
+  axes_3D() +
+  stat_3D()+
+  labs_3D(labs=c("Grams", "Arbts", "Density"), hjust=c(0,1,1), vjust=c(1, 1, -0.2), angle=c(0, 0, 90)) 
+  
+```
+
+
+We can take this a step further plotting the correlation matrix for all the variables in the dataset.
+
+```{r, warning=FALSE}
+ggpairs(data = seeds, columns = 2:ncol(seeds),
+        alpha=0.4, ggplot2::aes(colour = Grupo),
+        title = 'Correlation matrix',
+        upper = list(continuous = "cor"),
+        lower = list(continuous = "points"))
+```
+
+
+## <u>*PCA*</u>
+
+### Descriptive for PCA - covariance matrix
+
+```{r,warning=FALSE}
+
+kable(round(cor <- cor(seeds[2:ncol(seeds)]),2),
+      caption = "Covariance matrix")  #R matrix
+```
+
+
+### Adjusting the model
+
+```{r, warning=FALSE}
+data_matrix <- data.matrix(seeds[2:8], rownames.force=NA) # Convert to data.matrix to use vegan::rda()
+PCA <- rda(data_matrix, scale=TRUE)
+pca_summ <- summary(PCA)$cont$importance 
+kable(pca_summ, caption = "PCA Summary: Importance of Components")
+```
+
+### How many components?
+
+Selecting how many components based on variability they represent, *i.e.* importance of components
+
+
+
+#### Criteria 1: Eigenvalues
+
+```{r,warning=FALSE}
+# Eigenvalues
+PC_values <- PCA$CA$eig
+eigenvalues <- data.frame(PC = paste0("PC", 1:7), PC_value = PC_values)
+
+ggplot(eigenvalues, aes(x = PC, y = PC_value)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  labs(title = "Eigenvalue analysis", x = "Principal Component", y = "Eigenvalue") +
+  theme_minimal()
+```
+
+
+#### Criteria 2: Cummulative proportion for each PC
+
+```{r,warning=FALSE}
+proportion <- summary(PCA)$cont$importance[2, ]
+cummulative_proportion <- data.frame(PC = paste0("PC", 1:7), Cummulative_prop = proportion)
+
+ggplot(cummulative_proportion, aes(x = PC, y = Cummulative_prop)) +
+  geom_bar(stat = "identity", fill = "skyblue", alpha=0.75) +
+  geom_line(group = 1, color = "black", size = 1) +  
+  geom_point(color = "black", size = 3) + 
+  geom_text(aes(label = round(Cummulative_prop, 2)), vjust = -0.5, color = "black", size = 4) +
+  labs(title = "Cummulative proportion analysis", x = "Principal Component", y = "Proportion") +
+  theme_minimal()
+```
+
+## <u>*Plotting the results of PCA: the biplot*</u>
+
+```{r,warning=FALSE}
+scores_PCA <- scores(PCA, choices = c(1, 2))  
+seeds$Grupo <- as.factor(seeds$Grupo) 
+PCA_df <- data.frame(scores_PCA, Grupo = seeds$Grupo)
+
+PC1label = paste0("PC 1 (", round(cummulative_proportion[1,]$Cummulative_prop, 3)*100, "%)")  
+PC2label = paste0("PC 2 (", round(cummulative_proportion[2,]$Cummulative_prop, 3)*100, "%)")  
+
+ggplot(PCA_df, aes(x = sites.PC1, y = sites.PC2, color = Grupo)) +
+  geom_point(size = 3) + 
+  stat_ellipse(type = "norm", size = 1) + 
+  labs(title = "PCA: Proyección sobre los ejes PC1 y PC2", x = `PC1label`, y = `PC2label`) +
+  theme_minimal() +
+  theme(legend.title = element_blank()) +
+  geom_vline(xintercept=0, linetype='dashed') + 
+  geom_hline(yintercept=0, linetype='dashed')
+```
+
+## <u>*Interpretation of results*</u>
+
+```{r,warning=FALSE}
+loadings <- scores(PCA, display = "species")
+kable(loadings)
+```
+
++ We've obtained each variable's loading (correlation) on each PC. 
++ Correlation values can be interpreted whether they are positive or negative ( *e.g.* when the value is positive, the variable augments when the PC does) or near zero (does not contribute greatly to the PC formation).
++ Therefore, Subarbts, Manti and Densidad (positively correlated) and SueDes (negatively correlated) are great inputs for PC1. This can be interpreted as PC1 describing a coverage axis (high *vs.* low coverage density of the soil), that separates the seeds' patches..
++ Similarly, for PC2, the input is largely driven by Arbs and Grams, representing the type of foliage (shrubs  and grasses).
+
